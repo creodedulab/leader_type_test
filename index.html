@@ -126,6 +126,7 @@
         /* --- 2. 퀴즈 화면 (Quiz Screen) --- */
         #quiz-screen {
             justify-content: flex-start;
+            padding-bottom: 40px;
         }
 
         /* 진행률 바 */
@@ -136,6 +137,7 @@
             border-radius: 4px;
             margin-bottom: 30px;
             overflow: hidden;
+            flex-shrink: 0;
         }
 
         .progress-bar {
@@ -159,7 +161,11 @@
             margin-bottom: 30px;
         }
 
-        /* 선택지 버튼 */
+        /* 선택지 버튼 영역 */
+        #options-container {
+            flex-grow: 1;
+        }
+
         .option-btn {
             background-color: #ffffff;
             border: 2px solid #dadce0;
@@ -173,10 +179,56 @@
             min-height: 70px;
         }
 
-        .option-btn:hover, .option-btn:active {
+        /* 선택된 상태 (Highlight) */
+        .option-btn.selected {
             border-color: #1a73e8;
             background-color: #e8f0fe;
             color: #1a73e8;
+            font-weight: 700;
+        }
+
+        /* 하단 네비게이션 버튼 (이전/다음) */
+        .nav-container {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+            flex-shrink: 0;
+        }
+
+        .nav-btn {
+            padding: 18px;
+            border-radius: 12px;
+            border: none;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 0.2s, opacity 0.2s;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .nav-btn:active {
+            transform: scale(0.97);
+        }
+
+        .btn-prev {
+            flex: 1;
+            background-color: #e8eaed;
+            color: #5f6368;
+        }
+
+        .btn-next {
+            flex: 2;
+            background-color: #1a73e8;
+            color: white;
+            box-shadow: 0 4px 10px rgba(26, 115, 232, 0.2);
+        }
+
+        .btn-next:disabled {
+            background-color: #a8c7fa;
+            box-shadow: none;
+            cursor: not-allowed;
         }
 
         /* --- 3. 결과 화면 (Result Screen) --- */
@@ -268,7 +320,13 @@
         <h2 id="question-text" class="question-text">질문 텍스트가 여기에 표시됩니다.</h2>
         
         <div id="options-container">
-            <!-- 선택지 버튼들이 JavaScript를 통해 동적으로 생성됩니다 -->
+            <!-- 선택지 버튼들이 동적으로 생성됩니다 -->
+        </div>
+
+        <!-- 하단 네비게이션 -->
+        <div class="nav-container">
+            <button id="btn-prev" class="nav-btn btn-prev" onclick="goPrev()">이전</button>
+            <button id="btn-next" class="nav-btn btn-next" onclick="goNext()" disabled>다음</button>
         </div>
     </div>
 
@@ -288,8 +346,8 @@
 </div>
 
 <script>
-    // --- 25개 문항 및 4지 선다 데이터 정의 ---
-    const questions = [
+    // --- 25개 문항 데이터 ---
+    const questionsData = [
         {
             text: "학생회 축제 기획 회의 중, 친구들의 의견이 엇갈려서 분위기가 싸해졌다. 나는 어떻게 할까?",
             options: [
@@ -517,7 +575,10 @@
         }
     ];
 
-    // 결과 데이터 (4가지 유형)
+    // --- 실행에 쓰일 문제 배열 선언 ---
+    let questions = [];
+
+    // 결과 데이터
     const results = {
         speaker: {
             title: "마이크를 잡으면 빛나는<br>[스피커형 리더]",
@@ -547,12 +608,7 @@
 
     // --- 상태 변수 ---
     let currentQuestionIndex = 0;
-    let scores = {
-        speaker: 0,
-        strategist: 0,
-        mood: 0,
-        supporter: 0
-    };
+    let userAnswers = [];
 
     // --- DOM 요소 ---
     const startScreen = document.getElementById('start-screen');
@@ -562,13 +618,28 @@
     const questionNumber = document.getElementById('question-number');
     const progressBar = document.getElementById('progress-bar');
     const optionsContainer = document.getElementById('options-container');
+    const btnNext = document.getElementById('btn-next');
+    const btnPrev = document.getElementById('btn-prev');
 
     // --- 함수 ---
     function startQuiz() {
+        // 테스트 시작 시 원본 데이터를 복사해오면서, 각 문항의 선택지만 1회 섞어줍니다.
+        // 뒤로 가기를 눌렀을 때 선택지 순서가 바뀌지 않게 하기 위함입니다.
+        questions = JSON.parse(JSON.stringify(questionsData));
+        questions.forEach(q => {
+            for (let i = q.options.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [q.options[i], q.options[j]] = [q.options[j], q.options[i]];
+            }
+        });
+
+        // 사용자 답변 기록 초기화 (25개 문항을 모두 null로 채움)
+        userAnswers = new Array(questions.length).fill(null);
+
         startScreen.classList.remove('active');
         quizScreen.classList.add('active');
         currentQuestionIndex = 0;
-        scores = { speaker: 0, strategist: 0, mood: 0, supporter: 0 };
+        
         renderQuestion();
     }
 
@@ -583,35 +654,72 @@
         // 질문 텍스트 업데이트
         questionText.innerText = currentQuestion.text;
 
-        // 선택지 섞기 (배열 복사 후 Fisher-Yates shuffle 알고리즘 적용)
-        const shuffledOptions = [...currentQuestion.options];
-        for (let i = shuffledOptions.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [shuffledOptions[i], shuffledOptions[j]] = [shuffledOptions[j], shuffledOptions[i]];
-        }
-
-        // 선택지 생성 (섞인 순서대로)
+        // 선택지 생성
         optionsContainer.innerHTML = '';
-        shuffledOptions.forEach(option => {
+        currentQuestion.options.forEach((option) => {
             const button = document.createElement('button');
             button.className = 'btn option-btn';
             button.innerText = option.text;
-            button.onclick = () => handleAnswer(option.type);
+            
+            // 만약 사용자가 이전에 이 문항에서 선택했던 답이라면 색상을 칠해줌(복원)
+            if (userAnswers[currentQuestionIndex] === option.type) {
+                button.classList.add('selected');
+            }
+
+            button.onclick = () => selectOption(option.type, button);
             optionsContainer.appendChild(button);
         });
+
+        // 이전 버튼 보이기/숨기기 처리 (1번 문제일 땐 이전 버튼 숨김)
+        if (currentQuestionIndex === 0) {
+            btnPrev.style.visibility = 'hidden';
+        } else {
+            btnPrev.style.visibility = 'visible';
+        }
+
+        // 다음 버튼 활성화 여부 처리 (옵션을 선택해야 활성화)
+        if (userAnswers[currentQuestionIndex] === null) {
+            btnNext.disabled = true;
+        } else {
+            btnNext.disabled = false;
+        }
+
+        // 마지막 문제일 경우 '다음' 버튼 텍스트를 '결과 보기'로 변경
+        if (currentQuestionIndex === questions.length - 1) {
+            btnNext.innerText = '결과 보기';
+        } else {
+            btnNext.innerText = '다음';
+        }
     }
 
-    function handleAnswer(selectedType) {
-        // 점수 증가
-        scores[selectedType]++;
+    function selectOption(selectedType, btnElement) {
+        // 답변 기록 저장
+        userAnswers[currentQuestionIndex] = selectedType;
         
-        // 다음 질문 또는 결과 화면으로 이동
-        currentQuestionIndex++;
-        if (currentQuestionIndex < questions.length) {
+        // UI 업데이트 (모든 버튼의 선택 효과 제거 후, 현재 누른 버튼만 추가)
+        const buttons = optionsContainer.querySelectorAll('.option-btn');
+        buttons.forEach(btn => btn.classList.remove('selected'));
+        btnElement.classList.add('selected');
+
+        // 하단 '다음' 버튼 활성화
+        btnNext.disabled = false;
+    }
+
+    function goPrev() {
+        if (currentQuestionIndex > 0) {
+            currentQuestionIndex--;
+            renderQuestion();
+        }
+    }
+
+    function goNext() {
+        if (currentQuestionIndex < questions.length - 1) {
+            currentQuestionIndex++;
             renderQuestion();
         } else {
-            progressBar.style.width = `100%`; // 마지막 진행률 100% 채우기
-            setTimeout(showResult, 300); // 아주 살짝 딜레이
+            // 마지막 문제일 경우 결과 화면으로 이동
+            progressBar.style.width = `100%`;
+            setTimeout(showResult, 200); 
         }
     }
 
@@ -619,11 +727,17 @@
         quizScreen.classList.remove('active');
         resultScreen.classList.add('active');
 
+        // 기록된 답변을 바탕으로 점수 합산
+        let finalScores = { speaker: 0, strategist: 0, mood: 0, supporter: 0 };
+        userAnswers.forEach(answer => {
+            if(answer) finalScores[answer]++;
+        });
+
         // 최고 점수 계산
         let maxScore = 0;
         let finalType = 'speaker'; // 기본값
 
-        for (const [type, score] of Object.entries(scores)) {
+        for (const [type, score] of Object.entries(finalScores)) {
             if (score > maxScore) {
                 maxScore = score;
                 finalType = type;
